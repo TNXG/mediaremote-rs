@@ -226,15 +226,6 @@ match info {
 2. 激励苹果为我们提供一个公共 API，用于读取媒体播放信息和控制设备上的媒体播放
 3. 为 Rust 生态系统贡献一个高质量的媒体控制库
 
-### 应用案例
-
-此库已被多个项目采用：
-
-- **Music Presence** - 一个跨平台桌面应用程序，用于在 Discord 状态中显示正在收听的内容。自 2.3.1 版本起使用本库从所有媒体播放器检测媒体。
-- **media-control** - 一个 CLI 工具，用于在任何 macOS 版本上控制和观察媒体播放。可直接通过 Homebrew 安装：`brew tap ungive/media-control && brew install media-control`
-
-如果你在项目中使用了本库，欢迎告诉我们！
-
 ## 许可证
 
 本项目采用 MIT 许可证 - 详情请参阅 [LICENSE](LICENSE) 文件。
