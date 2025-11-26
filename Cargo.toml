@@ -5,6 +5,7 @@ edition = "2024"
 description = "Access macOS MediaRemote.framework to get now playing information"
 license = "MIT"
 repository = "https://github.com/TNXG/mediaremote-rs"
+homepage = "https://crates.io/crates/mediaremote-rs"
 keywords = ["macos", "media", "now-playing", "music", "apple"]
 categories = ["os::macos-apis", "multimedia"]
 readme = "README.md"
