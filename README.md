@@ -1,239 +1,142 @@
 # mediaremote-rs
 
-[![Crates.io](https://img.shields.io/crates/v/mediaremote-rs)](https://crates.io/crates/mediaremote-rs)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Crates.io](https://img.shields.io/crates/v/mediaremote-rs?style=flat-square)](https://crates.io/crates/mediaremote-rs)
+[![License](https://img.shields.io/crates/l/mediaremote-rs?style=flat-square)](https://opensource.org/licenses/MIT)
 
-这是一个 Rust 库，用于访问 macOS 的 `MediaRemote.framework`，以便从媒体应用程序中检索“正在播放”的信息。该库允许开发者获取当前曲目信息、检查播放状态，并在媒体状态发生变化时流式传输实时更新。
+**mediaremote-rs** 是一个 Rust 库，用于访问 macOS 的私有 `MediaRemote.framework`。它允许开发者获取系统当前的媒体播放信息（如曲目、艺术家、进度等），并监听播放状态的实时变化。
 
-## 特性
+由于 macOS 15.4+ 对 MediaRemote 框架实施了更严格的访问限制，本库通过独特的跨进程适配器技术，确保在最新版 macOS 上依然可用。
 
-- **“正在播放”信息**：获取当前曲目详情，包括标题、艺术家、专辑、时长和播放进度。
-- **实时更新**：以可自定义的时间间隔流式传输媒体状态的实时变化。
-- **专辑封面**：以 Base64 编码字符串形式访问专辑封面数据，支持自动检测 MIME 类型。
-- **跨进程支持**：提供基于 Perl 的适配器，用于与外部进程集成。
-- **类型安全**：完整的 Rust 类型系统，支持 JSON 序列化。
-- **macOS 原生**：直接绑定 Apple 的 MediaRemote.framework 以获得最佳性能。
+---
 
-## 系统要求
+## ✨ 特性
 
-- **macOS** (推荐 10.12 或更高版本)
-- **Rust** 1.85+ (Edition 2024)
-- **Xcode 命令行工具** (用于框架链接)
+- **获取播放信息**：读取当前曲目标题、艺术家、专辑、时长、播放进度等。
+- **实时状态监听**：订阅媒体状态变化，仅在发生变动时接收更新（基于 Rust Channel）。
+- **专辑封面支持**：获取 Base64 编码的封面图片及 MIME 类型。
+- **权限检测**：提供 API 检测当前环境是否支持 MediaRemote 访问。
+- **强类型接口**：提供完整的 Rust 类型定义和 JSON 序列化支持。
+- **广泛兼容性**：支持 Apple Music, Spotify, Chrome, IINA 等所有集成系统媒体控制的应用。
 
-## 使用方法
+## 📦 安装
 
-### 基本用法
+在 `Cargo.toml` 中添加依赖：
 
-```rust
-use mediaremote_rs::{get_now_playing, is_playing};
-
-// 检查媒体当前是否正在播放
-if is_playing() {
-    println!("Something is playing!");
-}
-
-// 获取当前播放信息
-if let Some(info) = get_now_playing() {
-    println!("Now playing: {} - {}", info.title, info.artist.unwrap_or("Unknown".to_string()));
-}
+```toml
+[dependencies]
+mediaremote-rs = "0.1.1"
 ```
 
-### 实时更新
+## 🚀 使用方法
+
+### 1. 基础查询
+
+获取当前的播放状态和详细信息。
 
 ```rust
-use std::time::Duration;
-use mediaremote_rs::subscribe;
-
-// 订阅实时更新，每 500ms 检查一次
-let receiver = subscribe(Duration::from_millis(500));
-
-for info in receiver {
-    if info.playing {
-        println!("🎵 {} - {}", info.title, info.artist.unwrap_or("Unknown".to_string()));
-    } else {
-        println!("⏸️ Paused: {}", info.title);
-    }
-}
-```
-
-### 完整示例
-
-```rust
-use mediaremote_rs::NowPlayingInfo;
-use std::time::Duration;
+use mediaremote_rs::{get_now_playing, is_playing, test_access};
 
 fn main() {
-    println!("macOS Media Remote Example");
+    // 可选：检查是否能够访问 MediaRemote 服务
+    if !test_access() {
+        eprintln!("无法访问 MediaRemote 服务，请检查权限或系统版本。");
+        return;
+    }
 
-    // 简单检查
-    if mediaremote_rs::is_playing() {
-        println!("Media is currently playing");
+    // 检查是否有媒体正在播放
+    if is_playing() {
+        println!("正在播放中...");
     }
 
     // 获取详细信息
-    if let Some(info) = mediaremote_rs::get_now_playing() {
-        print_now_playing_info(&info);
-    }
-
-    // 实时监控
-    println!("\nStarting real-time monitoring (Ctrl+C to exit)...");
-    let receiver = mediaremote_rs::subscribe(Duration::from_secs(1));
-
-    for info in receiver {
-        print_now_playing_info(&info);
-    }
-}
-
-fn print_now_playing_info(info: &NowPlayingInfo) {
-    println!("\n🎵 Now Playing:");
-    println!("  App: {}", info.bundle_identifier);
-    println!("  Title: {}", info.title);
-
-    if let Some(artist) = &info.artist {
-        println!("  Artist: {}", artist);
-    }
-
-    if let Some(album) = &info.album {
-        println!("  Album: {}", album);
-    }
-
-    if let Some(duration) = info.duration {
-        if let Some(elapsed) = info.elapsed_time {
-            println!("  Progress: {:.1}s / {:.1}s", elapsed, duration);
-        } else {
-            println!("  Duration: {:.1}s", duration);
+    if let Some(info) = get_now_playing() {
+        println!("标题: {}", info.title);
+        println!("艺术家: {}", info.artist.unwrap_or_default());
+        println!("专辑: {}", info.album.unwrap_or_default());
+        
+        if let Some(duration) = info.duration {
+            println!("时长: {:.1} 秒", duration);
         }
+    } else {
+        println!("当前没有媒体播放信息");
     }
-
-    if let Some(artwork) = &info.artwork_data {
-        println!("  Artwork: {} ({} bytes)",
-                info.artwork_mime_type.as_ref().unwrap_or(&"unknown".to_string()),
-                artwork.len());
-    }
-
-    println!("  Status: {}", if info.playing { "▶️ Playing" } else { "⏸️ Paused" });
 }
 ```
 
-## 数据结构
+### 2. 实时监听
 
-该库提供了一个全面的 `NowPlayingInfo` 结构体：
+使用 `subscribe` 函数创建一个监听器，它会在后台线程轮询并在状态变化时发送消息。
+
+```rust
+use mediaremote_rs::subscribe;
+use std::time::Duration;
+
+fn main() {
+    // 每 500ms 检查一次变化
+    let receiver = subscribe(Duration::from_millis(500));
+
+    println!("开始监听媒体状态变化 (按 Ctrl+C 停止)...");
+
+    for info in receiver {
+        if info.playing {
+            println!("▶️ {} - {}", info.title, info.artist.unwrap_or("未知艺术家".into()));
+        } else {
+            println!("⏸️ 已暂停: {}", info.title);
+        }
+    }
+}
+```
+
+## 🧩 数据结构
+
+核心结构体 `NowPlayingInfo` 包含了所有可用的媒体信息：
 
 ```rust
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NowPlayingInfo {
-    pub bundle_identifier: String,           // 应用包 ID (例如 "com.apple.Music")
-    pub playing: bool,                       // 当前播放状态
-    pub title: String,                       // 曲目标题
-    pub artist: Option<String>,              // 艺术家名称
-    pub album: Option<String>,               // 专辑名称
-    pub duration: Option<f64>,               // 总时长（秒）
-    pub elapsed_time: Option<f64>,           // 当前进度（秒）
-    pub artwork_mime_type: Option<String>,   // 封面 MIME 类型 (JPEG, PNG 等)
-    pub artwork_data: Option<String>,        // Base64 编码的封面数据
-    pub playback_rate: Option<f64>,          // 播放速率 (1.0 = 正常速度)
+    pub bundle_identifier: String,           // 应用包 ID (如 "com.apple.Music")
+    pub playing: bool,                       // 播放状态
+    pub title: String,                       // 标题
+    pub artist: Option<String>,              // 艺术家
+    pub album: Option<String>,               // 专辑
+    pub duration: Option<f64>,               // 总时长(秒)
+    pub elapsed_time: Option<f64>,           // 当前进度(秒)
+    pub artwork_mime_type: Option<String>,   // 封面格式 (如 "image/jpeg")
+    pub artwork_data: Option<String>,        // 封面数据 (Base64 字符串)
+    pub playback_rate: Option<f64>,          // 播放速率
 }
 ```
 
-## 支持的应用程序
+## 🛠️ 工作原理与架构
 
-此库适用于任何使用标准媒体远程框架 (Media Remote Framework) 的 macOS 应用程序，包括：
+### 背景
+从 macOS 15.4 开始，苹果限制了普通应用直接加载 `MediaRemote.framework`。只有拥有特定 entitlement 或 `com.apple.` 前缀的系统应用才能正常使用。
 
-- **Apple Music**
-- **Spotify**
-- **VLC**
-- **QuickTime Player**
-- **Safari** (用于网页视频/音频)
-- **Chrome**, **Firefox** (用于网页媒体)
-- 还有更多...
+### 解决方案
+本库采用了一种**双进程架构**来绕过此限制：
 
-### 构建输出
+1.  **Rust 主进程**：你的应用程序。
+2.  **Perl 适配器**：利用系统内置的 `/usr/bin/perl` (它拥有 `com.apple.perl5` 签名，因此有权访问 MediaRemote)。
 
-- **Debug**: `target/debug/libmediaremote_rs.dylib`
-- **Release**: `target/release/libmediaremote_rs.dylib`
+### 流程
+1.  Rust 程序在运行时提取一个预编译的动态库 (`libmediaremote_rs.dylib`) 到临时目录。
+2.  通过 `Command` 调用系统 Perl，加载该动态库。
+3.  动态库通过 Objective-C 接口调用 MediaRemote API 获取数据。
+4.  数据序列化为 JSON 并通过标准输出返回给 Rust 主进程。
 
-该库会构建为以下两种形式：
-- **cdylib**: 供其他语言使用的动态链接库
-- **rlib**: 供 Rust 直接集成的 Rust 库
+这种方法既保证了功能的可用性，又通过 Rust 封装提供了类型安全和易用性。
 
-## 工作原理
+## ⚠️ 注意事项
 
-### 为什么这个方案可行
+- **性能**：虽然使用了子进程调用，但库经过优化，仅在必要时进行 IPC 通信。对于 `subscribe` 模式，建议轮询间隔不低于 200ms 以平衡实时性和 CPU 占用。
+- **环境要求**：
+    - macOS 10.12+
+    - 系统必须安装有 `/usr/bin/perl` (macOS 默认自带)
 
-根据技术发现，具有 `com.apple.` 前缀的应用程序包标识符被系统授予访问 MediaRemote 框架的权限。Perl 平台二进制文件 `/usr/bin/perl` 被系统认可为拥有 `com.apple.perl5` 的包标识符。
+## 🤝 贡献
 
-你可以通过在运行时使用 Console.app 流式传输日志消息来验证这一点：
+欢迎提交 Issue 和 Pull Request！
 
-```
-default	14:44:55.871495+0200	mediaremoted	Adding client <MRDMediaRemoteClient 0x15820b1a0, bundleIdentifier = com.apple.perl5, pid = 86889>
-```
+## 📄 许可证
 
-通过利用这个系统特性，本库能够绕过现代 macOS 版本对直接 MediaRemote 访问的限制。
-
-## 架构
-
-该库采用了精密的多层架构：
-
-1.  **核心层 (Core Layer)**: 与 `MediaRemote.framework` 的直接 Objective-C 绑定。
-2.  **适配层 (Adapter Layer)**: 使用 `DynaLoader` 的基于 Perl 的跨进程兼容层，绕过系统权限限制。
-3.  **API 层 (API Layer)**: 清晰、类型安全的 Rust 接口。
-4.  **流式层 (Streaming Layer)**: 使用 Rust Channel 实现的实时更新。
-
-## 错误处理
-
-库提供了优雅的错误处理机制：
-
-```rust
-// 所有函数都返回 Option<T> 以处理以下情况：
-// - 无媒体正在播放
-// - 应用程序不支持媒体远程控制
-// - 系统权限阻止访问
-// - 框架调用失败
-
-let info = get_now_playing();
-match info {
-    Some(data) => println!("Got info: {}", data.title),
-    None => println!("No media currently playing"),
-}
-```
-
-## 环境变量
-
-- `MEDIAREMOTE_DYLIB_PATH`: 覆盖编译后的 dylib 文件路径。
-- `MEDIAREMOTE_DYLIB_PATH` 在构建过程中会自动嵌入，用于运行时解析。
-
-## 线程安全
-
-- 所有公共函数都是线程安全的。
-- `subscribe()` 函数会生成一个专用的监控线程。
-- 共享状态使用 Rust 的所有权系统进行保护。
-
-## 性能
-
-- **最小开销**：通过 Perl 适配器的优化调用，避免频繁的进程切换开销。
-- **高效流式传输**：仅在发生实际更改时才发送更新。
-- **低内存占用**：自动清理 Objective-C 对象。
-- **快速启动**：无初始化延迟或预热期。
-
-## 项目背景
-
-### 创建动机
-
-从 macOS 15.4 开始，MediaRemote 框架在应用程序中直接加载时完全失效。尽管有许多相关的问题报告，但苹果公司尚未提供官方解决方案。
-
-本项目旨在：
-1. 提供一个功能完整的替代方案，让开发者能够持续访问媒体播放信息
-2. 激励苹果为我们提供一个公共 API，用于读取媒体播放信息和控制设备上的媒体播放
-3. 为 Rust 生态系统贡献一个高质量的媒体控制库
-
-## 许可证
-
-本项目采用 MIT 许可证 - 详情请参阅 [LICENSE](LICENSE) 文件。
-
-## 贡献
-
-欢迎贡献代码！请随时提交 Pull Request。对于重大更改，请先开一个 Issue 讨论您想要更改的内容。
-
-## 致谢
-
-本项目灵感来源于 [mediaremote-adapter](https://github.com/ungive/mediaremote-adapter) 的实现，该项目首次发现了 Perl 适配器方案来解决 MediaRemote 框架的访问限制问题。我们在此基础上用 Rust 重新实现，提供了一个类型安全、高性能的库接口，更便于 Rust 开发者集成和使用。
+MIT License

@@ -1,6 +1,9 @@
 name: Publish to crates.io
 
 on:
+  push:
+    paths:
+      - 'Cargo.toml'
   release:
     types: [published]
   workflow_dispatch:
