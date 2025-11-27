@@ -5,11 +5,18 @@ mod types;
 
 pub use types::NowPlayingInfo;
 
+use std::fs;
+use std::io::Write;
 use std::process::{Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
+use std::sync::OnceLock;
 use std::thread;
 use std::time::Duration;
 
+/// 嵌入预编译的 dylib
+const EMBEDDED_DYLIB: &[u8] = include_bytes!("../resources/libmediaremote_rs.dylib");
+
+/// Perl 加载脚本
 const LOADER_SCRIPT: &str = r#"
 use strict;
 use warnings;
@@ -25,43 +32,52 @@ eval { main::run(); };
 exit($@ ? 1 : 0);
 "#;
 
-fn get_dylib_path() -> Option<String> {
-    // 优先使用编译时嵌入的路径
-    let compile_time_path = option_env!("MEDIAREMOTE_DYLIB_PATH");
-    if let Some(p) = compile_time_path {
-        let path = std::path::Path::new(p);
-        if path.exists() {
-            return Some(p.to_string());
+/// 获取 dylib 路径（首次调用时提取到临时目录）
+fn get_dylib_path() -> Option<&'static str> {
+    static DYLIB_PATH: OnceLock<Option<String>> = OnceLock::new();
+    
+    DYLIB_PATH.get_or_init(|| {
+        // 使用固定的临时目录路径，避免重复提取
+        let cache_dir = std::env::temp_dir().join("mediaremote-rs");
+        let dylib_path = cache_dir.join("libmediaremote_rs.dylib");
+        
+        // 检查是否需要重新提取（文件不存在或大小不匹配）
+        let need_extract = match fs::metadata(&dylib_path) {
+            Ok(meta) => meta.len() != EMBEDDED_DYLIB.len() as u64,
+            Err(_) => true,
+        };
+        
+        if need_extract {
+            // 创建目录
+            if fs::create_dir_all(&cache_dir).is_err() {
+                return None;
+            }
+            
+            // 写入 dylib
+            let mut file = fs::File::create(&dylib_path).ok()?;
+            file.write_all(EMBEDDED_DYLIB).ok()?;
+            
+            // 设置可执行权限
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mut perms = fs::metadata(&dylib_path).ok()?.permissions();
+                perms.set_mode(0o755);
+                fs::set_permissions(&dylib_path, perms).ok()?;
+            }
         }
-    }
-
-    // 回退：运行时查找
-    let candidates = [
-        std::env::current_exe()
-            .ok()
-            .and_then(|p| p.parent().map(|p| p.join("libmediaremote_rs.dylib"))),
-        std::env::current_exe()
-            .ok()
-            .and_then(|p| p.parent().map(|p| p.join("deps/libmediaremote_rs.dylib"))),
-        std::env::var("MEDIAREMOTE_DYLIB_PATH")
-            .ok()
-            .map(std::path::PathBuf::from),
-    ];
-
-    for candidate in candidates.into_iter().flatten() {
-        if candidate.exists() {
-            return candidate.to_str().map(|s| s.to_string());
-        }
-    }
-    None
+        
+        dylib_path.to_str().map(|s| s.to_string())
+    }).as_deref()
 }
 
 fn call_adapter() -> Option<NowPlayingInfo> {
     let dylib_path = get_dylib_path()?;
+    
     let output = Command::new("/usr/bin/perl")
         .arg("-e")
         .arg(LOADER_SCRIPT)
-        .arg(&dylib_path)
+        .arg(dylib_path)
         .arg("get")
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -125,6 +141,24 @@ pub fn subscribe(interval: Duration) -> Receiver<NowPlayingInfo> {
     });
 
     rx
+}
+
+/// 测试是否可以访问 MediaRemote
+pub fn test_access() -> bool {
+    if let Some(dylib_path) = get_dylib_path() {
+        let output = Command::new("/usr/bin/perl")
+            .arg("-e")
+            .arg(LOADER_SCRIPT)
+            .arg(dylib_path)
+            .arg("test")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+        
+        output.map(|s| s.success()).unwrap_or(false)
+    } else {
+        false
+    }
 }
 
 // FFI exports (called by Perl)

@@ -4,3 +4,4 @@ Cargo.lock
 *.pdb
 *.dSYM
 .DS_Store
+resources/
