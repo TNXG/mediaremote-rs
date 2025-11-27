@@ -9,6 +9,13 @@ homepage = "https://crates.io/crates/mediaremote-rs"
 keywords = ["macos", "media", "now-playing", "music", "apple"]
 categories = ["os::macos-apis", "multimedia"]
 readme = "README.md"
+include = [
+    "src/**/*",
+    "build.rs",
+    "resources/libmediaremote_rs.dylib",
+    "LICENSE",
+    "README.md"
+]
 build = "build.rs"
 
 [lib]

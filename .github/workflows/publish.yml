@@ -25,14 +25,14 @@ jobs:
           # Get version from Cargo.toml
           CARGO_VERSION=$(grep '^version = ' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
           echo "cargo_version=$CARGO_VERSION" >> $GITHUB_OUTPUT
-          
+
           # Get latest published version from crates.io
           CRATE_NAME=$(grep '^name = ' Cargo.toml | head -1 | sed 's/name = "\(.*\)"/\1/')
           PUBLISHED_VERSION=$(curl -s "https://crates.io/api/v1/crates/$CRATE_NAME" | grep -o '"max_version":"[^"]*"' | head -1 | sed 's/"max_version":"\(.*\)"/\1/')
-          
+
           echo "Cargo.toml version: $CARGO_VERSION"
           echo "Published version: $PUBLISHED_VERSION"
-          
+
           if [ "$CARGO_VERSION" != "$PUBLISHED_VERSION" ]; then
             echo "Version has changed, will publish"
             echo "should_publish=true" >> $GITHUB_OUTPUT
@@ -40,6 +40,26 @@ jobs:
             echo "Version unchanged, skipping publish"
             echo "should_publish=false" >> $GITHUB_OUTPUT
           fi
+
+      - name: Build dynamic library
+        if: steps.version_check.outputs.should_publish == 'true'
+        run: |
+          # Build the dynamic library in release mode
+          cargo build --release --lib
+          echo "Dynamic library built successfully"
+
+      - name: Setup resources directory and copy dylib
+        if: steps.version_check.outputs.should_publish == 'true'
+        run: |
+          # Ensure resources directory exists
+          mkdir -p resources
+
+          # Copy the built dynamic library to resources directory
+          cp target/release/libmediaremote_rs.dylib resources/
+
+          # Verify the dylib exists and show its size
+          ls -la resources/libmediaremote_rs.dylib
+          echo "Dynamic library copied to resources/"
 
       - name: Publish to crates.io
         if: steps.version_check.outputs.should_publish == 'true'
