@@ -83,11 +83,11 @@ unsafe fn parse_now_playing_dict(dict_ptr: *const AnyObject) -> Option<NowPlayin
         if value.is_null() {
             return None;
         }
-        let ns_str: *const NSString = value as *const NSString;
-        if ns_str.is_null() {
+        let desc: *const NSString = msg_send![value, description];
+        if desc.is_null() {
             return None;
         }
-        Some(unsafe { (*ns_str).to_string() })
+        Some(unsafe { (*desc).to_string() })
     };
 
     // Helper to get number value from dict
