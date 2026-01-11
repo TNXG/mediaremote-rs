@@ -56,6 +56,15 @@ jobs:
           ls -la resources/libmediaremote_rs.dylib
           echo "Dynamic library copied to resources/"
 
+          # Code sign the dylib to avoid macOS security warnings
+          # Using ad-hoc signature (-s -) which works without a certificate
+          codesign --force --deep -s - resources/libmediaremote_rs.dylib
+          echo "Dynamic library signed with ad-hoc signature"
+
+          # Verify the signature
+          codesign -dv resources/libmediaremote_rs.dylib
+          echo "Signature verification completed"
+
           # Clean and rebuild to embed the real dylib
           cargo clean
           cargo build --release --lib
