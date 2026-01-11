@@ -35,7 +35,10 @@ fn sign_dylib(dylib_path: &PathBuf) {
     // 使用 - (ad-hoc签名) 可以在没有证书的情况下进行签名
     // 这样可以避免 macOS 弹出安全警告
     let output = Command::new("codesign")
-        .args(["--force", "--deep", "-s", "-", "-"])
+        .arg("--force")
+        .arg("--deep")
+        .arg("-s")
+        .arg("-")
         .arg(dylib_path)
         .output();
 
