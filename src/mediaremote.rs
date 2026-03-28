@@ -6,13 +6,53 @@ use objc2_foundation::NSString;
 use std::cell::Cell;
 use std::ffi::c_void;
 use std::ptr;
+use std::sync::OnceLock;
 use std::time::Duration;
 
-#[link(name = "MediaRemote", kind = "framework")]
-#[link(name = "CoreFoundation", kind = "framework")]
-unsafe extern "C" {
-    fn MRMediaRemoteGetNowPlayingInfo(dispatch_queue: *const c_void, callback: *const c_void);
-    fn MRMediaRemoteGetNowPlayingClient(dispatch_queue: *const c_void, callback: *const c_void);
+type MRGetNowPlayingInfoFn = unsafe extern "C" fn(*const c_void, *const c_void);
+type MRGetNowPlayingClientFn = unsafe extern "C" fn(*const c_void, *const c_void);
+
+/// Dynamically loaded MediaRemote framework bindings.
+///
+/// Uses dlopen/dlsym to avoid link-time dependency on MediaRemote.framework,
+/// which transitively pulls in SwiftUICore and causes Xcode 16 linker errors.
+struct MediaRemoteBindings {
+    get_now_playing_info: MRGetNowPlayingInfoFn,
+    get_now_playing_client: MRGetNowPlayingClientFn,
+}
+
+static BINDINGS: OnceLock<Option<MediaRemoteBindings>> = OnceLock::new();
+
+/// Load MediaRemote.framework at runtime via dlopen/dlsym.
+fn get_bindings() -> Option<&'static MediaRemoteBindings> {
+    BINDINGS
+        .get_or_init(|| unsafe {
+            let path =
+                b"/System/Library/PrivateFrameworks/MediaRemote.framework/MediaRemote\0";
+            let handle = libc::dlopen(path.as_ptr() as *const i8, libc::RTLD_LAZY);
+            if handle.is_null() {
+                return None;
+            }
+
+            let get_info = libc::dlsym(
+                handle,
+                b"MRMediaRemoteGetNowPlayingInfo\0".as_ptr() as *const i8,
+            );
+            let get_client = libc::dlsym(
+                handle,
+                b"MRMediaRemoteGetNowPlayingClient\0".as_ptr() as *const i8,
+            );
+
+            if get_info.is_null() || get_client.is_null() {
+                return None;
+            }
+
+            Some(MediaRemoteBindings {
+                get_now_playing_info: std::mem::transmute(get_info),
+                get_now_playing_client: std::mem::transmute(get_client),
+            })
+        })
+        .as_ref()
 }
 
 #[link(name = "System", kind = "dylib")]
@@ -22,6 +62,7 @@ unsafe extern "C" {
 
 /// Get now playing information from MediaRemote
 pub fn get_now_playing_info() -> Option<NowPlayingInfo> {
+    let bindings = get_bindings()?;
     let result: Cell<Option<NowPlayingInfo>> = Cell::new(None);
     let bundle_id: Cell<Option<String>> = Cell::new(None);
 
@@ -49,8 +90,8 @@ pub fn get_now_playing_info() -> Option<NowPlayingInfo> {
         let queue =
             dispatch_queue_create(b"com.mediaremote.queue\0".as_ptr() as *const i8, ptr::null());
 
-        MRMediaRemoteGetNowPlayingClient(queue, (&*bundle_block) as *const _ as *const c_void);
-        MRMediaRemoteGetNowPlayingInfo(queue, (&*block) as *const _ as *const c_void);
+        (bindings.get_now_playing_client)(queue, (&*bundle_block) as *const _ as *const c_void);
+        (bindings.get_now_playing_info)(queue, (&*block) as *const _ as *const c_void);
     }
 
     // Run the run loop briefly to allow the callback to execute
