@@ -12,8 +12,8 @@
 ## ✨ 特性
 
 - **获取播放信息**：读取当前曲目标题、艺术家、专辑、时长、播放进度等。
-- **实时状态监听**：订阅媒体状态变化，仅在发生变动时接收更新（基于 Rust Channel）。
-- **专辑封面支持**：获取 Base64 编码的封面图片及 MIME 类型。
+- **实时状态监听**：订阅媒体状态变化，仅在发生变动时接收更新（基于长生命周期适配器进程和 Rust Channel）。
+- **专辑封面支持**：获取二进制封面图片及 MIME 类型。
 - **权限检测**：提供 API 检测当前环境是否支持 MediaRemote 访问。
 - **强类型接口**：提供完整的 Rust 类型定义和 JSON 序列化支持。
 - **广泛兼容性**：支持 Apple Music, Spotify, Chrome, IINA 等所有集成系统媒体控制的应用。
@@ -24,10 +24,12 @@
 
 ```toml
 [dependencies]
-mediaremote-rs = "0.1.1"
+mediaremote-rs = "0.2.0"
 ```
 
 ## 🚀 使用方法
+
+在 Rust 项目中使用本库非常简单，只需在 `Cargo.toml` 中添加依赖后，即可通过以下方式调用：
 
 ### 1. 基础查询
 
@@ -102,7 +104,7 @@ pub struct NowPlayingInfo {
     pub duration: Option<f64>,               // 总时长(秒)
     pub elapsed_time: Option<f64>,           // 当前进度(秒)
     pub artwork_mime_type: Option<String>,   // 封面格式 (如 "image/jpeg")
-    pub artwork_data: Option<String>,        // 封面数据 (Base64 字符串)
+    pub artwork_data: Option<Vec<u8>>,       // 封面二进制数据
     pub playback_rate: Option<f64>,          // 播放速率
 }
 ```
@@ -126,9 +128,12 @@ pub struct NowPlayingInfo {
 
 这种方法既保证了功能的可用性，又通过 Rust 封装提供了类型安全和易用性。
 
+### 致谢
+本库的实现思路和后续维护思路均来自于 [ungive/mediaremote-adapter](https://github.com/ungive/mediaremote-adapter)。
+
 ## ⚠️ 注意事项
 
-- **性能**：虽然使用了子进程调用，但库经过优化，仅在必要时进行 IPC 通信。对于 `subscribe` 模式，建议轮询间隔不低于 200ms 以平衡实时性和 CPU 占用。
+- **性能**：单次查询会启动短生命周期适配器进程；`subscribe` 模式会复用一个长生命周期适配器进程，避免每次刷新都重复启动 Perl。
 - **环境要求**：
     - macOS 10.12+
     - 系统必须安装有 `/usr/bin/perl` (macOS 默认自带)

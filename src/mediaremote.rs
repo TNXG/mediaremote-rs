@@ -11,6 +11,7 @@ use std::time::Duration;
 
 type MRGetNowPlayingInfoFn = unsafe extern "C" fn(*const c_void, *const c_void);
 type MRGetNowPlayingClientFn = unsafe extern "C" fn(*const c_void, *const c_void);
+type MRGetNowPlayingApplicationIsPlayingFn = unsafe extern "C" fn(*const c_void, *const c_void);
 
 /// Dynamically loaded MediaRemote framework bindings.
 ///
@@ -19,6 +20,7 @@ type MRGetNowPlayingClientFn = unsafe extern "C" fn(*const c_void, *const c_void
 struct MediaRemoteBindings {
     get_now_playing_info: MRGetNowPlayingInfoFn,
     get_now_playing_client: MRGetNowPlayingClientFn,
+    get_now_playing_application_is_playing: MRGetNowPlayingApplicationIsPlayingFn,
 }
 
 static BINDINGS: OnceLock<Option<MediaRemoteBindings>> = OnceLock::new();
@@ -27,8 +29,7 @@ static BINDINGS: OnceLock<Option<MediaRemoteBindings>> = OnceLock::new();
 fn get_bindings() -> Option<&'static MediaRemoteBindings> {
     BINDINGS
         .get_or_init(|| unsafe {
-            let path =
-                b"/System/Library/PrivateFrameworks/MediaRemote.framework/MediaRemote\0";
+            let path = b"/System/Library/PrivateFrameworks/MediaRemote.framework/MediaRemote\0";
             let handle = libc::dlopen(path.as_ptr() as *const i8, libc::RTLD_LAZY);
             if handle.is_null() {
                 return None;
@@ -42,14 +43,19 @@ fn get_bindings() -> Option<&'static MediaRemoteBindings> {
                 handle,
                 b"MRMediaRemoteGetNowPlayingClient\0".as_ptr() as *const i8,
             );
+            let get_is_playing = libc::dlsym(
+                handle,
+                b"MRMediaRemoteGetNowPlayingApplicationIsPlaying\0".as_ptr() as *const i8,
+            );
 
-            if get_info.is_null() || get_client.is_null() {
+            if get_info.is_null() || get_client.is_null() || get_is_playing.is_null() {
                 return None;
             }
 
             Some(MediaRemoteBindings {
                 get_now_playing_info: std::mem::transmute(get_info),
                 get_now_playing_client: std::mem::transmute(get_client),
+                get_now_playing_application_is_playing: std::mem::transmute(get_is_playing),
             })
         })
         .as_ref()
@@ -65,6 +71,7 @@ pub fn get_now_playing_info() -> Option<NowPlayingInfo> {
     let bindings = get_bindings()?;
     let result: Cell<Option<NowPlayingInfo>> = Cell::new(None);
     let bundle_id: Cell<Option<String>> = Cell::new(None);
+    let playing: Cell<Option<bool>> = Cell::new(None);
 
     // Get bundle identifier from MRMediaRemoteGetNowPlayingClient
     let bundle_block = StackBlock::new(|client: *const AnyObject| {
@@ -86,12 +93,22 @@ pub fn get_now_playing_info() -> Option<NowPlayingInfo> {
         }
     });
 
+    let playing_block = StackBlock::new(|is_playing: i8| {
+        playing.set(Some(is_playing != 0));
+    });
+
     unsafe {
-        let queue =
-            dispatch_queue_create(b"com.mediaremote.queue\0".as_ptr() as *const i8, ptr::null());
+        let queue = dispatch_queue_create(
+            b"com.mediaremote.queue\0".as_ptr() as *const i8,
+            ptr::null(),
+        );
 
         (bindings.get_now_playing_client)(queue, (&*bundle_block) as *const _ as *const c_void);
         (bindings.get_now_playing_info)(queue, (&*block) as *const _ as *const c_void);
+        (bindings.get_now_playing_application_is_playing)(
+            queue,
+            (&*playing_block) as *const _ as *const c_void,
+        );
     }
 
     // Run the run loop briefly to allow the callback to execute
@@ -101,6 +118,9 @@ pub fn get_now_playing_info() -> Option<NowPlayingInfo> {
     if let Some(mut info) = result.take() {
         if let Some(bid) = bundle_id.take() {
             info.bundle_identifier = bid;
+        }
+        if let Some(is_playing) = playing.take() {
+            info.playing = is_playing;
         }
         Some(info)
     } else {
@@ -154,7 +174,7 @@ unsafe fn parse_now_playing_dict(dict_ptr: *const AnyObject) -> Option<NowPlayin
     info.elapsed_time = get_number(dict, "kMRMediaRemoteNowPlayingInfoElapsedTime");
     info.playback_rate = get_number(dict, "kMRMediaRemoteNowPlayingInfoPlaybackRate");
 
-    // Determine if playing based on playback rate
+    // 仅作为兜底：优先使用 MediaRemote 专用播放状态回调。
     info.playing = info.playback_rate.map(|r| r > 0.0).unwrap_or(false);
 
     // Get artwork data
@@ -165,7 +185,7 @@ unsafe fn parse_now_playing_dict(dict_ptr: *const AnyObject) -> Option<NowPlayin
         let len: usize = msg_send![artwork_data, length];
         if !bytes.is_null() && len > 0 {
             let slice = unsafe { std::slice::from_raw_parts(bytes as *const u8, len) };
-            info.artwork_data = Some(base64_encode(slice));
+            info.artwork_data = Some(slice.to_vec());
             info.artwork_mime_type = detect_image_mime_type(slice);
         }
     }
@@ -174,7 +194,7 @@ unsafe fn parse_now_playing_dict(dict_ptr: *const AnyObject) -> Option<NowPlayin
 }
 
 pub fn test_access() -> bool {
-    get_now_playing_info().is_some()
+    get_bindings().is_some()
 }
 
 fn run_loop_once(duration: Duration) {
@@ -184,36 +204,6 @@ fn run_loop_once(duration: Duration) {
             msg_send![class!(NSDate), dateWithTimeIntervalSinceNow: duration.as_secs_f64()];
         let _: () = msg_send![run_loop, runUntilDate: date];
     }
-}
-
-/// Base64 encode bytes
-fn base64_encode(data: &[u8]) -> String {
-    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-    let mut result = String::with_capacity((data.len() + 2) / 3 * 4);
-
-    for chunk in data.chunks(3) {
-        let b0 = chunk[0] as usize;
-        let b1 = chunk.get(1).copied().unwrap_or(0) as usize;
-        let b2 = chunk.get(2).copied().unwrap_or(0) as usize;
-
-        result.push(ALPHABET[b0 >> 2] as char);
-        result.push(ALPHABET[((b0 & 0x03) << 4) | (b1 >> 4)] as char);
-
-        if chunk.len() > 1 {
-            result.push(ALPHABET[((b1 & 0x0f) << 2) | (b2 >> 6)] as char);
-        } else {
-            result.push('=');
-        }
-
-        if chunk.len() > 2 {
-            result.push(ALPHABET[b2 & 0x3f] as char);
-        } else {
-            result.push('=');
-        }
-    }
-
-    result
 }
 
 /// Detect image MIME type from magic bytes
@@ -236,7 +226,7 @@ fn detect_image_mime_type(data: &[u8]) -> Option<String> {
 
     if data.len() >= 12
         && data.starts_with(&[0x52, 0x49, 0x46, 0x46])
-        && &data[8..12] == &[0x57, 0x45, 0x42, 0x50]
+        && data[8..12] == [0x57, 0x45, 0x42, 0x50]
     {
         return Some("image/webp".to_string());
     }
